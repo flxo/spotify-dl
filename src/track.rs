@@ -21,29 +21,26 @@ trait TrackCollection {
     async fn get_tracks(&self, session: &Session) -> Vec<Track>;
 }
 
-/// !!! Hack'n dirty tricks to download Track only see breaking changes in librespot 0.8.0
-#[tracing::instrument(name = "get_tracks", skip(_session), level = "debug")]
-pub async fn get_tracks(spotify_ids: Vec<String>, _session: &Session) -> Result<Vec<Track>> {
+#[tracing::instrument(name = "get_tracks", skip(session), level = "debug")]
+pub async fn get_tracks(spotify_ids: Vec<String>, session: &Session) -> Result<Vec<Track>> {
     let mut tracks: Vec<Track> = Vec::new();
     for id in spotify_ids {
         tracing::debug!("Getting tracks for: {}", id);
         let id = parse_uri_or_url(&id).ok_or(anyhow::anyhow!("Invalid track"))?;
-        let new_tracks = vec![Track::from_id(id)];
-        //let new_tracks = match id.item_type() {
-            //librespot::core::SpotifyUri::Track => vec![Track::from_id(id)],
-            //librespot::core::SpotifyUri::Track { id: _ } => vec![Track::from_id(id)],
-            //librespot::core::SpotifyUri::Episode => vec![Track::from_id(id)],
-            //librespot::core::SpotifyUri::Album => {
-            //    Album::from_id(id).get_tracks(session).await
-            //}
-            //librespot::core::SpotifyUri::Playlist => {
-            //    Playlist::from_id(id).get_tracks(session).await
-            //}
-            //_ => {
-            //    tracing::warn!("Unsupported item type: {:?}", id.item_type());
-            //    vec![]
-            //}
-        //};
+        let new_tracks = match id {
+            librespot::core::SpotifyUri::Track { id: _ } => vec![Track::from_id(id)],
+            librespot::core::SpotifyUri::Episode { id: _ } => vec![Track::from_id(id)],
+            librespot::core::SpotifyUri::Album { id: _ } => {
+                Album::from_id(id).get_tracks(session).await
+            }
+            librespot::core::SpotifyUri::Playlist { id: _, .. }=> {
+                Playlist::from_id(id).get_tracks(session).await
+            }
+            _ => {
+                tracing::warn!("Unsupported item type: {:?}", id.item_type());
+                vec![]
+            }
+        };
         tracks.extend(new_tracks);
     }
     tracing::debug!("Got tracks: {:?}", tracks);
@@ -156,15 +153,15 @@ impl Album {
     }
 }
 
-//#[async_trait::async_trait]
-//impl TrackCollection for Album {
-//    async fn get_tracks(&self, session: &Session) -> Vec<Track> {
-//        let album = librespot::metadata::Album::get(session, &self.id)
-//            .await
-//            .expect("Failed to get album");
-//        album.tracks().map(|track| Track::from_id(*track)).collect()
-//    }
-//}
+#[async_trait::async_trait]
+impl TrackCollection for Album {
+    async fn get_tracks(&self, session: &Session) -> Vec<Track> {
+        let album = librespot::metadata::Album::get(session, &self.id)
+            .await
+            .expect("Failed to get album");
+        album.tracks().map(|track| Track::from_id(track.clone())).collect()
+    }
+}
 
 pub struct Playlist {
     id: SpotifyUri,
@@ -187,18 +184,18 @@ impl Playlist {
     }
 }
 
-//#[async_trait::async_trait]
-//impl TrackCollection for Playlist {
-//    async fn get_tracks(&self, session: &Session) -> Vec<Track> {
-//        let playlist = librespot::metadata::Playlist::get(session, &self.id)
-//            .await
-//            .expect("Failed to get playlist");
-//        playlist
-//            .tracks()
-//            .map(|track| Track::from_id(*track))
-//            .collect()
-//    }
-//}
+#[async_trait::async_trait]
+impl TrackCollection for Playlist {
+    async fn get_tracks(&self, session: &Session) -> Vec<Track> {
+        let playlist = librespot::metadata::Playlist::get(session, &self.id)
+            .await
+            .expect("Failed to get playlist");
+        playlist
+            .tracks()
+            .map(|track| Track::from_id(track.clone()))
+            .collect()
+    }
+}
 
 #[derive(Clone)]
 pub struct TrackMetadata {
